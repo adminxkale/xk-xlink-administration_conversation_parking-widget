@@ -9,11 +9,12 @@ export interface MultiAgentResult {
 
 export async function getMultiAgentInteractions(
   service: InteractionService,
-  agents: ManagedAgent[]
+  agents: ManagedAgent[],
+  tenant?: string
 ): Promise<MultiAgentResult> {
   const results = await Promise.allSettled(
     agents.map(async (agent) => {
-      const interactions = await service.getInteractions(agent.id);
+      const interactions = await service.getInteractions(agent.id, tenant);
       return interactions.map((interaction) => ({
         ...interaction,
         agentId: interaction.agentId ?? agent.id,

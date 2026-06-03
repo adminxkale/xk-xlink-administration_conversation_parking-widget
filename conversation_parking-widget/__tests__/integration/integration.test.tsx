@@ -7,6 +7,7 @@ import { ConversationParkingWidget } from "../../src/presentation/components/Con
 import { AuthProvider } from "../../src/presentation/components/AuthProvider";
 import type { AuthState } from "../../src/domain/entities/auth";
 import type { Interaction } from "../../src/domain/entities/interaction";
+import type { GenesysCredentials } from "../../src/domain/entities/tenant";
 
 // ── Mocks ──────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ vi.mock("../../src/infrastructure/adapters/lines.adapter", () => ({
 const mockGetInteractions = vi.fn();
 const mockUnparkInteraction = vi.fn();
 const mockSendTemplate = vi.fn();
+const mockGetManagedAgents = vi.fn();
 
 vi.mock("../../src/infrastructure/config/service-registry", () => ({
   getInteractionService: () => ({
@@ -33,6 +35,9 @@ vi.mock("../../src/infrastructure/config/service-registry", () => ({
   }),
   getTemplateService: () => ({
     sendTemplate: mockSendTemplate,
+  }),
+  getManagedAgentService: () => ({
+    getManagedAgents: mockGetManagedAgents,
   }),
 }));
 
@@ -55,6 +60,12 @@ const mockFetchGroupPhones = vi.mocked(fetchGroupPhones);
 const mockFetchChannels = vi.mocked(fetchChannels);
 
 // ── Fixtures ───────────────────────────────────────────────────────
+
+const fakeCredentials: GenesysCredentials = {
+  genesys_client_id: 'test-client-id',
+  genesys_client_secret: 'test-secret',
+  environment: 'mypurecloud.com',
+};
 
 const fakeLines = [
   {
@@ -88,6 +99,7 @@ const authenticatedState: AuthState = {
   token: "valid-token",
   agent: { name: "Agent Smith", id: "agent-123" },
   agentGroupIds: ["group-a"],
+  tenantId: "test-tenant",
   error: null,
 };
 
@@ -106,6 +118,9 @@ describe("Integration tests", () => {
     mockFetchChannels.mockResolvedValue(fakeLines);
     mockGetInteractions.mockResolvedValue(fakeInteractions);
     mockSendTemplate.mockResolvedValue({ success: true });
+    mockGetManagedAgents.mockResolvedValue([
+      { id: "agent-123", name: "Agent Smith" },
+    ]);
   });
 
   afterEach(() => {
@@ -160,17 +175,17 @@ describe("Integration tests", () => {
       });
 
       render(
-        <AuthProvider>
+        <AuthProvider credentials={fakeCredentials} tenantId="test-tenant">
           <ConversationParkingWidget />
         </AuthProvider>
       );
 
       // Initially shows loading
-      expect(screen.getByText("Cargando...")).toBeInTheDocument();
+      expect(screen.getByText("Autenticando...")).toBeInTheDocument();
 
       // After auth resolves, the widget renders with the title
       await waitFor(() => {
-        expect(screen.getByText("Conversation Parking")).toBeInTheDocument();
+        expect(screen.getByText(/Conversation Parking/)).toBeInTheDocument();
       });
     });
   });

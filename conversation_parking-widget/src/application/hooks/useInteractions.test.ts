@@ -36,6 +36,8 @@ vi.mock("../../infrastructure/config/service-registry", () => ({
   }),
 }));
 
+const TEST_TENANT = 'test-tenant';
+
 describe("useInteractions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -47,21 +49,29 @@ describe("useInteractions", () => {
   });
 
   it("does not fetch when agentId is null", () => {
-    const { result } = renderHook(() => useInteractions(null, null));
+    const { result } = renderHook(() => useInteractions(null, null, TEST_TENANT));
 
     expect(result.current.isLoading).toBe(false);
     expect(result.current.interactions).toEqual([]);
     expect(mockGetInteractions).not.toHaveBeenCalled();
   });
 
-  it("fetches interactions when agentId is provided", async () => {
-    const { result } = renderHook(() => useInteractions("agent-123", "test-token"));
+  it("does not fetch when tenant is null", () => {
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", null));
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.interactions).toEqual([]);
+    expect(mockGetInteractions).not.toHaveBeenCalled();
+  });
+
+  it("fetches interactions when agentId and tenant are provided", async () => {
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", TEST_TENANT));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(mockGetInteractions).toHaveBeenCalledWith("agent-123");
+    expect(mockGetInteractions).toHaveBeenCalledWith("agent-123", TEST_TENANT);
     expect(result.current.interactions).toEqual(fakeInteractions);
     expect(result.current.error).toBeNull();
   });
@@ -69,7 +79,7 @@ describe("useInteractions", () => {
   it("sets error when fetch fails", async () => {
     mockGetInteractions.mockRejectedValue(new Error("Service down"));
 
-    const { result } = renderHook(() => useInteractions("agent-123", "test-token"));
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", TEST_TENANT));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -79,11 +89,11 @@ describe("useInteractions", () => {
     expect(result.current.interactions).toEqual([]);
   });
 
-  it("unpark calls unparkInteraction with correct params", async () => {
+  it("unpark calls unparkInteraction with correct params including tenant", async () => {
     const unparked: Interaction = { ...fakeInteractions[0], isParked: false };
     mockUnparkInteraction.mockResolvedValue(unparked);
 
-    const { result } = renderHook(() => useInteractions("agent-123", "test-token"));
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", TEST_TENANT));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -107,6 +117,7 @@ describe("useInteractions", () => {
       agentName: "Test Agent",
       queueId: "queue-1",
       token: "test-token",
+      tenant: TEST_TENANT,
     });
     const updated = result.current.interactions.find((i) => i.id === "c1");
     expect(updated?.isParked).toBe(false);
@@ -119,7 +130,7 @@ describe("useInteractions", () => {
     ];
     mockGetInteractions.mockResolvedValue(mixedInteractions);
 
-    const { result } = renderHook(() => useInteractions("agent-123", "test-token"));
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", TEST_TENANT));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -135,7 +146,7 @@ describe("useInteractions", () => {
   it("retry re-fetches interactions", async () => {
     mockGetInteractions.mockRejectedValueOnce(new Error("Fail"));
 
-    const { result } = renderHook(() => useInteractions("agent-123", "test-token"));
+    const { result } = renderHook(() => useInteractions("agent-123", "test-token", TEST_TENANT));
 
     await waitFor(() => {
       expect(result.current.error).toBe("Fail");

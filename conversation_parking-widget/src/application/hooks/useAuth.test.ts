@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useAuth } from "./useAuth";
+import type { GenesysCredentials } from "../../domain/entities/tenant";
 
 // Mock the genesys-auth adapter
 vi.mock("../../infrastructure/adapters/genesys-auth.adapter", () => ({
@@ -22,6 +23,12 @@ const mockValidateToken = vi.mocked(validateToken);
 const mockClearToken = vi.mocked(clearToken);
 const mockRedirectToLogin = vi.mocked(redirectToLogin);
 
+const fakeCredentials: GenesysCredentials = {
+  genesys_client_id: 'test-client-id',
+  genesys_client_secret: 'test-secret',
+  environment: 'mypurecloud.com',
+};
+
 describe("useAuth", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -31,9 +38,8 @@ describe("useAuth", () => {
     vi.restoreAllMocks();
   });
 
-  it("starts in loading state", () => {
-    mockExtractToken.mockReturnValue(null);
-    const { result } = renderHook(() => useAuth());
+  it("stays in loading state when credentials is null", () => {
+    const { result } = renderHook(() => useAuth(null));
 
     expect(result.current.isLoading).toBe(true);
     expect(result.current.isAuthenticated).toBe(false);
@@ -41,12 +47,11 @@ describe("useAuth", () => {
 
   it("redirects to login when no token is found (first attempt)", async () => {
     mockExtractToken.mockReturnValue(null);
-    // Ensure no redirect flag is set
     sessionStorage.removeItem('auth_redirect_pending');
-    renderHook(() => useAuth());
+    renderHook(() => useAuth(fakeCredentials));
 
     await waitFor(() => {
-      expect(mockRedirectToLogin).toHaveBeenCalled();
+      expect(mockRedirectToLogin).toHaveBeenCalledWith('test-client-id', 'mypurecloud.com');
     });
   });
 
@@ -58,7 +63,7 @@ describe("useAuth", () => {
       groupIds: ["group-a", "group-b"],
     });
 
-    const { result } = renderHook(() => useAuth());
+    const { result } = renderHook(() => useAuth(fakeCredentials));
 
     await waitFor(() => {
       expect(result.current.isAuthenticated).toBe(true);
@@ -69,13 +74,14 @@ describe("useAuth", () => {
     expect(result.current.agent).toEqual({ name: "Agent Smith", id: "agent-123" });
     expect(result.current.agentGroupIds).toEqual(["group-a", "group-b"]);
     expect(result.current.error).toBeNull();
+    expect(mockValidateToken).toHaveBeenCalledWith("valid-token", "mypurecloud.com");
   });
 
   it("clears token and shows error when validation fails (no redirect loop)", async () => {
     mockExtractToken.mockReturnValue("bad-token");
     mockValidateToken.mockRejectedValue(new Error("Token validation failed with status 401"));
 
-    const { result } = renderHook(() => useAuth());
+    const { result } = renderHook(() => useAuth(fakeCredentials));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -85,7 +91,6 @@ describe("useAuth", () => {
     expect(result.current.token).toBeNull();
     expect(result.current.error).toBe("Token validation failed with status 401");
     expect(mockClearToken).toHaveBeenCalled();
-    // Should NOT redirect on validation failure to prevent redirect loops
     expect(mockRedirectToLogin).not.toHaveBeenCalled();
   });
 
@@ -93,7 +98,7 @@ describe("useAuth", () => {
     mockExtractToken.mockReturnValue("some-token");
     mockValidateToken.mockRejectedValue("unexpected");
 
-    const { result } = renderHook(() => useAuth());
+    const { result } = renderHook(() => useAuth(fakeCredentials));
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

@@ -17,7 +17,8 @@ interface UseAgentLinesResult {
 }
 
 export function useAgentLines(
-  agentGroupIds: string[] | null
+  agentGroupIds: string[] | null,
+  tenant?: string | null
 ): UseAgentLinesResult {
   const [lines, setLines] = useState<Line[]>([]);
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export function useAgentLines(
   useEffect(() => {
     // null means still loading auth — do nothing
     if (agentGroupIds === null) return;
+    if (!tenant) return;
 
     let cancelled = false;
 
@@ -39,7 +41,7 @@ export function useAgentLines(
 
         if (agentGroupIds!.length > 0) {
           const settled = await Promise.allSettled(
-            agentGroupIds!.map((gid) => fetchGroupPhones(gid))
+            agentGroupIds!.map((gid) => fetchGroupPhones(gid, tenant!))
           );
 
           const fulfilled = settled.filter(
@@ -54,14 +56,12 @@ export function useAgentLines(
           }
 
           result = consolidateLines(fulfilled.map((r) => r.value));
-          console.log('[useAgentLines] Consolidated lines:', result);
         } else {
           result = await fetchChannels();
         }
 
         if (cancelled) return;
 
-        console.log('[useAgentLines] Líneas cargadas en el selector:', result);
         setLines(result);
       } catch (err) {
         if (cancelled) return;
@@ -76,7 +76,7 @@ export function useAgentLines(
     return () => {
       cancelled = true;
     };
-  }, [agentGroupIds]);
+  }, [agentGroupIds, tenant]);
 
   return { lines, selectedLineId, setSelectedLineId, isLoading, error };
 }

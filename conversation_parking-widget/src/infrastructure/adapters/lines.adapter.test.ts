@@ -7,6 +7,12 @@ describe('lines.adapter', () => {
   });
 
   describe('fetchGroupPhones', () => {
+    it('throws when tenant is not provided', async () => {
+      await expect(fetchGroupPhones('group-1')).rejects.toThrow(
+        'Tenant is required to fetch group phones'
+      );
+    });
+
     it('returns parsed lines from Xlink API response format', async () => {
       const mockXlinkResponse = [
         {
@@ -23,13 +29,13 @@ describe('lines.adapter', () => {
         json: () => Promise.resolve(mockXlinkResponse),
       });
 
-      const result = await fetchGroupPhones('group-1');
+      const result = await fetchGroupPhones('group-1', 'test-tenant');
 
       expect(result).toEqual([
         { id: '+1234567890', number: 'Line A', phone_number_id: '+1234567890', phone_number: '+1234567890', groups: ['group-1'] },
         { id: '+0987654321', number: 'Line B', phone_number_id: '+0987654321', phone_number: '+0987654321', groups: ['group-1'] },
       ]);
-      expect(fetch).toHaveBeenCalledWith('/api/proxy-group-phones?group_id=group-1');
+      expect(fetch).toHaveBeenCalledWith('/api/proxy-group-phones?tenant=test-tenant');
     });
 
     it('returns empty array for non-array response', async () => {
@@ -38,7 +44,7 @@ describe('lines.adapter', () => {
         json: () => Promise.resolve({ not: 'an array' }),
       });
 
-      const result = await fetchGroupPhones('group-2');
+      const result = await fetchGroupPhones('group-2', 'test-tenant');
 
       expect(result).toEqual([]);
     });
@@ -46,21 +52,21 @@ describe('lines.adapter', () => {
     it('throws on non-ok response', async () => {
       global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
 
-      await expect(fetchGroupPhones('group-x')).rejects.toThrow(
-        'Failed to fetch group phones for group group-x: 500'
+      await expect(fetchGroupPhones('group-x', 'test-tenant')).rejects.toThrow(
+        'Failed to fetch group phones for tenant test-tenant: 500'
       );
     });
 
-    it('encodes groupId in URL', async () => {
+    it('encodes tenant in URL', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: () => Promise.resolve([]),
       });
 
-      await fetchGroupPhones('group with spaces');
+      await fetchGroupPhones('group-1', 'tenant with spaces');
 
       expect(fetch).toHaveBeenCalledWith(
-        '/api/proxy-group-phones?group_id=group%20with%20spaces'
+        '/api/proxy-group-phones?tenant=tenant%20with%20spaces'
       );
     });
   });

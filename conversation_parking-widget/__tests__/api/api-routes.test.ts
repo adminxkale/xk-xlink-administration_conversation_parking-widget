@@ -58,20 +58,21 @@ describe('POST /api/send-template', () => {
 
 describe('GET /api/proxy-group-phones', () => {
   const originalFetch = globalThis.fetch;
-  const originalEnv = process.env.XLINK_GROUPS_API_URL;
 
   beforeEach(() => {
-    process.env.XLINK_GROUPS_API_URL = 'https://fake-xlink.example.com/xlink_groups';
+    vi.stubEnv('AUTH_USER', 'TestUser');
+    vi.stubEnv('AUTH_PASS', 'TestPass');
+    vi.stubEnv('STAGE', 'dev');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
-    process.env.XLINK_GROUPS_API_URL = originalEnv;
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
-  it('returns phones for the given group_id', async () => {
-    const xlinkResponse = [
+  it('returns data for the given tenant', async () => {
+    const apiResponse = [
       {
         group_id: 'grp-42',
         phone_numbers: { 'Line A': '+573001234567', 'Line B': '+573009876543' },
@@ -81,53 +82,44 @@ describe('GET /api/proxy-group-phones', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve(xlinkResponse),
+      json: () => Promise.resolve(apiResponse),
     });
 
     const request = new Request(
-      'http://localhost/api/proxy-group-phones?group_id=grp-42',
+      'http://localhost/api/proxy-group-phones?tenant=Xkale',
     );
     const response = await getGroupPhones(request);
 
     expect(response.status).toBe(200);
     const json = await response.json();
-    expect(Array.isArray(json)).toBe(true);
-    expect(json).toEqual(xlinkResponse);
+    expect(json).toEqual(apiResponse);
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://fake-xlink.example.com/xlink_groups/grp-42?partitionKey=group_id',
+      'https://api-dev.xlinkapp.cloud/management-multitenant/external/management-tables/xlink-dev-template-cache/Xkale',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'Content-Type': 'application/json',
+        }),
+      }),
     );
   });
 
-  it('returns 400 without group_id', async () => {
+  it('returns 400 without tenant', async () => {
     const request = new Request('http://localhost/api/proxy-group-phones');
     const response = await getGroupPhones(request);
 
     expect(response.status).toBe(400);
     const json = await response.json();
-    expect(json.error).toContain('group_id');
+    expect(json.error).toContain('tenant');
   });
 
-  it('returns 500 when XLINK_GROUPS_API_URL is not configured', async () => {
-    delete process.env.XLINK_GROUPS_API_URL;
-
-    const request = new Request(
-      'http://localhost/api/proxy-group-phones?group_id=grp-42',
-    );
-    const response = await getGroupPhones(request);
-
-    expect(response.status).toBe(500);
-    const json = await response.json();
-    expect(json.error).toContain('XLINK_GROUPS_API_URL');
-  });
-
-  it('returns 502 when Xlink API returns error', async () => {
+  it('returns 502 when external API returns error', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
     });
 
     const request = new Request(
-      'http://localhost/api/proxy-group-phones?group_id=grp-42',
+      'http://localhost/api/proxy-group-phones?tenant=Xkale',
     );
     const response = await getGroupPhones(request);
 

@@ -16,7 +16,7 @@ import { ToastProvider } from "./ToastProvider";
 
 function ConversationParkingWidgetInner() {
   const { addToast } = useToastContext();
-  const { agent, token } = useAuthContext();
+  const { agent, token, tenantId } = useAuthContext();
 
   // Multi-agent hooks
   const {
@@ -31,7 +31,7 @@ function ConversationParkingWidgetInner() {
     isLoading: interactionsLoading,
     error: interactionsError,
     refresh,
-  } = useMultiAgentInteractions(agent?.id ?? null, addToast);
+  } = useMultiAgentInteractions(agent?.id ?? null, addToast, tenantId);
 
   const {
     filters,

@@ -17,7 +17,8 @@ interface UseMultiAgentInteractionsResult {
 
 export function useMultiAgentInteractions(
   principalAgentId: string | null,
-  addToast?: (params: { type: ToastType; message: string }) => void
+  addToast?: (params: { type: ToastType; message: string }) => void,
+  tenant?: string | null
 ): UseMultiAgentInteractionsResult {
   const { agents, isLoading: agentsLoading, error: agentsError } = useManagedAgents(principalAgentId);
 
@@ -30,14 +31,14 @@ export function useMultiAgentInteractions(
   addToastRef.current = addToast;
 
   const fetchInteractions = useCallback(async () => {
-    if (agents.length === 0) return;
+    if (agents.length === 0 || !tenant) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
       const service = getInteractionService();
-      const result = await getMultiAgentInteractions(service, agents);
+      const result = await getMultiAgentInteractions(service, agents, tenant);
 
       setInteractions(result.interactions);
       setFailedCount(result.failedAgentIds.length);
@@ -55,13 +56,13 @@ export function useMultiAgentInteractions(
     } finally {
       setIsLoading(false);
     }
-  }, [agents]);
+  }, [agents, tenant]);
 
   useEffect(() => {
-    if (agents.length > 0) {
+    if (agents.length > 0 && tenant) {
       fetchInteractions();
     }
-  }, [agents, fetchInteractions]);
+  }, [agents, tenant, fetchInteractions]);
 
   const refresh = useCallback(() => {
     fetchInteractions();
