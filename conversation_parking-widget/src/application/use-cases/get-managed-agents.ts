@@ -3,7 +3,8 @@ import { ManagedAgent } from '@/src/domain/entities/managed-agent';
 
 export async function getManagedAgents(
   service: ManagedAgentService,
-  principalAgentId: string
+  principalAgentId: string,
+  tenant?: string
 ): Promise<ManagedAgent[]> {
-  return service.getManagedAgents(principalAgentId);
+  return service.getManagedAgents(principalAgentId, tenant);
 }

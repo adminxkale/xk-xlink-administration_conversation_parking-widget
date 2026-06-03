@@ -9,9 +9,13 @@ interface ManagedAgentsApiResponse {
 }
 
 export class RealManagedAgentService implements ManagedAgentService {
-  async getManagedAgents(principalAgentId: string): Promise<ManagedAgent[]> {
+  async getManagedAgents(principalAgentId: string, tenant?: string): Promise<ManagedAgent[]> {
+    if (!tenant) {
+      throw new Error('Tenant is required to fetch managed agents');
+    }
+
     const response = await fetch(
-      `/api/proxy-managed-agents?principal_agent_id=${encodeURIComponent(principalAgentId)}`
+      `/api/proxy-managed-agents?principal_agent_id=${encodeURIComponent(principalAgentId)}&tenant=${encodeURIComponent(tenant)}`
     );
 
     if (!response.ok) {
@@ -20,7 +24,19 @@ export class RealManagedAgentService implements ManagedAgentService {
       );
     }
 
-    const data: ManagedAgentsApiResponse[] = await response.json();
+    const raw = await response.json();
+
+    // Normalize: the API may return an array, a single object, or a wrapper { data: [...] }
+    let entries: ManagedAgentsApiResponse[];
+    if (Array.isArray(raw)) {
+      entries = raw;
+    } else if (raw && typeof raw === 'object' && Array.isArray(raw.data)) {
+      entries = raw.data;
+    } else if (raw && typeof raw === 'object') {
+      entries = [raw as ManagedAgentsApiResponse];
+    } else {
+      entries = [];
+    }
 
     // Transform the API response into ManagedAgent[]
     // The API returns objects with an "agents" map { id: name }
@@ -28,7 +44,7 @@ export class RealManagedAgentService implements ManagedAgentService {
     const agents: ManagedAgent[] = [];
     const seenIds = new Set<string>();
 
-    for (const entry of data) {
+    for (const entry of entries) {
       // Add the principal agent from this entry
       if (entry.agent_id && !seenIds.has(entry.agent_id)) {
         seenIds.add(entry.agent_id);

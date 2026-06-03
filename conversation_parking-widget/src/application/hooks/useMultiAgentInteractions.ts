@@ -20,7 +20,7 @@ export function useMultiAgentInteractions(
   addToast?: (params: { type: ToastType; message: string }) => void,
   tenant?: string | null
 ): UseMultiAgentInteractionsResult {
-  const { agents, isLoading: agentsLoading, error: agentsError } = useManagedAgents(principalAgentId);
+  const { agents, isLoading: agentsLoading, error: agentsError } = useManagedAgents(principalAgentId, tenant);
 
   const [interactions, setInteractions] = useState<Interaction[]>([]);
   const [isLoading, setIsLoading] = useState(false);

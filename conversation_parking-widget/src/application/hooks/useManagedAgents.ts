@@ -13,34 +13,28 @@ interface UseManagedAgentsResult {
 }
 
 export function useManagedAgents(
-  principalAgentId: string | null
+  principalAgentId: string | null,
+  tenant?: string | null
 ): UseManagedAgentsResult {
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAgents = useCallback(async () => {
-    if (!principalAgentId) return;
+    if (!principalAgentId || !tenant) return;
 
     setIsLoading(true);
     setError(null);
 
     try {
       const service = getManagedAgentService();
-      const result = await getManagedAgents(service, principalAgentId);
-
-      console.log('[useManagedAgents] Raw API response:', JSON.stringify(result, null, 2));
-      console.log('[useManagedAgents] Total agents received:', result.length);
-      console.log('[useManagedAgents] Agent IDs:', result.map((a) => a.id));
-      console.log('[useManagedAgents] Agents with undefined/null id:', result.filter((a) => a.id == null || a.id === ''));
+      const result = await getManagedAgents(service, principalAgentId, tenant);
 
       // Filter out agents without valid id, then deduplicate
       const valid = result.filter((agent) => agent.id != null && agent.id !== '');
       const unique = valid.filter(
         (agent, index, self) => self.findIndex((a) => a.id === agent.id) === index
       );
-
-      console.log('[useManagedAgents] After filtering/dedup:', unique.length, 'agents');
 
       setAgents(unique);
     } catch (err) {
@@ -52,7 +46,7 @@ export function useManagedAgents(
     } finally {
       setIsLoading(false);
     }
-  }, [principalAgentId]);
+  }, [principalAgentId, tenant]);
 
   useEffect(() => {
     fetchAgents();

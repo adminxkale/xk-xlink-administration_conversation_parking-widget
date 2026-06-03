@@ -24,7 +24,7 @@ function ConversationParkingWidgetInner() {
     isLoading: agentsLoading,
     error: agentsError,
     retry: retryAgents,
-  } = useManagedAgents(agent?.id ?? null);
+  } = useManagedAgents(agent?.id ?? null, tenantId);
 
   const {
     interactions,
