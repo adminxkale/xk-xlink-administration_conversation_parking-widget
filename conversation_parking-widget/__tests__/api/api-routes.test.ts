@@ -94,7 +94,7 @@ describe('GET /api/proxy-group-phones', () => {
     const json = await response.json();
     expect(json).toEqual(apiResponse);
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://api-dev.xlinkapp.cloud/management-multitenant/external/management-tables/xlink-dev-template-cache/Xkale',
+      'https://api.xlinkapp.cloud/management-multitenant/external/management-tables/xlink-dev-template-cache/Xkale',
       expect.objectContaining({
         headers: expect.objectContaining({
           'Content-Type': 'application/json',
