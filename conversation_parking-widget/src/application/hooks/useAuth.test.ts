@@ -5,23 +5,17 @@ import type { GenesysCredentials } from "../../domain/entities/tenant";
 
 // Mock the genesys-auth adapter
 vi.mock("../../infrastructure/adapters/genesys-auth.adapter", () => ({
-  extractToken: vi.fn(),
-  validateToken: vi.fn(),
+  loginWithPKCE: vi.fn(),
   clearToken: vi.fn(),
-  redirectToLogin: vi.fn(),
 }));
 
 import {
-  extractToken,
-  validateToken,
+  loginWithPKCE,
   clearToken,
-  redirectToLogin,
 } from "../../infrastructure/adapters/genesys-auth.adapter";
 
-const mockExtractToken = vi.mocked(extractToken);
-const mockValidateToken = vi.mocked(validateToken);
+const mockLoginWithPKCE = vi.mocked(loginWithPKCE);
 const mockClearToken = vi.mocked(clearToken);
-const mockRedirectToLogin = vi.mocked(redirectToLogin);
 
 const fakeCredentials: GenesysCredentials = {
   genesys_client_id: 'test-client-id',
@@ -45,22 +39,12 @@ describe("useAuth", () => {
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it("redirects to login when no token is found (first attempt)", async () => {
-    mockExtractToken.mockReturnValue(null);
-    sessionStorage.removeItem('auth_redirect_pending');
-    renderHook(() => useAuth(fakeCredentials));
-
-    await waitFor(() => {
-      expect(mockRedirectToLogin).toHaveBeenCalledWith('test-client-id', 'mypurecloud.com');
-    });
-  });
-
-  it("authenticates successfully when token is valid", async () => {
-    mockExtractToken.mockReturnValue("valid-token");
-    mockValidateToken.mockResolvedValue({
+  it("authenticates successfully when loginWithPKCE resolves", async () => {
+    mockLoginWithPKCE.mockResolvedValue({
       name: "Agent Smith",
       id: "agent-123",
       groupIds: ["group-a", "group-b"],
+      token: "valid-pkce-token",
     });
 
     const { result } = renderHook(() => useAuth(fakeCredentials));
@@ -70,16 +54,15 @@ describe("useAuth", () => {
     });
 
     expect(result.current.isLoading).toBe(false);
-    expect(result.current.token).toBe("valid-token");
+    expect(result.current.token).toBe("valid-pkce-token");
     expect(result.current.agent).toEqual({ name: "Agent Smith", id: "agent-123" });
     expect(result.current.agentGroupIds).toEqual(["group-a", "group-b"]);
     expect(result.current.error).toBeNull();
-    expect(mockValidateToken).toHaveBeenCalledWith("valid-token", "mypurecloud.com");
+    expect(mockLoginWithPKCE).toHaveBeenCalledWith("test-client-id", "mypurecloud.com");
   });
 
-  it("clears token and shows error when validation fails (no redirect loop)", async () => {
-    mockExtractToken.mockReturnValue("bad-token");
-    mockValidateToken.mockRejectedValue(new Error("Token validation failed with status 401"));
+  it("clears token and shows error when loginWithPKCE rejects", async () => {
+    mockLoginWithPKCE.mockRejectedValue(new Error("Token exchange failed (400): invalid_grant"));
 
     const { result } = renderHook(() => useAuth(fakeCredentials));
 
@@ -89,14 +72,12 @@ describe("useAuth", () => {
 
     expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.token).toBeNull();
-    expect(result.current.error).toBe("Token validation failed with status 401");
+    expect(result.current.error).toBe("Token exchange failed (400): invalid_grant");
     expect(mockClearToken).toHaveBeenCalled();
-    expect(mockRedirectToLogin).not.toHaveBeenCalled();
   });
 
-  it("sets error message for non-Error thrown values", async () => {
-    mockExtractToken.mockReturnValue("some-token");
-    mockValidateToken.mockRejectedValue("unexpected");
+  it("sets generic error message for non-Error thrown values", async () => {
+    mockLoginWithPKCE.mockRejectedValue("unexpected");
 
     const { result } = renderHook(() => useAuth(fakeCredentials));
 
@@ -105,5 +86,17 @@ describe("useAuth", () => {
     });
 
     expect(result.current.error).toBe("Authentication failed");
+  });
+
+  it("does not redirect — loginWithPKCE handles the full flow internally", async () => {
+    // When PKCE needs to redirect, the promise never resolves (page navigates away).
+    // In tests, we simulate this by having the promise hang indefinitely.
+    mockLoginWithPKCE.mockReturnValue(new Promise(() => {}));
+
+    const { result } = renderHook(() => useAuth(fakeCredentials));
+
+    // State stays in loading since the promise never resolves
+    expect(result.current.isLoading).toBe(true);
+    expect(result.current.isAuthenticated).toBe(false);
   });
 });
