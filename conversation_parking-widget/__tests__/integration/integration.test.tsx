@@ -12,10 +12,8 @@ import type { GenesysCredentials } from "../../src/domain/entities/tenant";
 // ── Mocks ──────────────────────────────────────────────────────────
 
 vi.mock("../../src/infrastructure/adapters/genesys-auth.adapter", () => ({
-  extractToken: vi.fn(),
-  validateToken: vi.fn(),
+  loginWithPKCE: vi.fn(),
   clearToken: vi.fn(),
-  redirectToLogin: vi.fn(),
 }));
 
 vi.mock("../../src/infrastructure/adapters/lines.adapter", () => ({
@@ -42,20 +40,16 @@ vi.mock("../../src/infrastructure/config/service-registry", () => ({
 }));
 
 import {
-  extractToken,
-  validateToken,
+  loginWithPKCE,
   clearToken,
-  redirectToLogin,
 } from "../../src/infrastructure/adapters/genesys-auth.adapter";
 import {
   fetchGroupPhones,
   fetchChannels,
 } from "../../src/infrastructure/adapters/lines.adapter";
 
-const mockExtractToken = vi.mocked(extractToken);
-const mockValidateToken = vi.mocked(validateToken);
+const mockLoginWithPKCE = vi.mocked(loginWithPKCE);
 const mockClearToken = vi.mocked(clearToken);
-const mockRedirectToLogin = vi.mocked(redirectToLogin);
 const mockFetchGroupPhones = vi.mocked(fetchGroupPhones);
 const mockFetchChannels = vi.mocked(fetchChannels);
 
@@ -167,11 +161,11 @@ describe("Integration tests", () => {
   // ── Test 2: Authentication flow ──────────────────────────────────
   describe("Authentication flow", () => {
     it("loading → token search → validation → widget access", async () => {
-      mockExtractToken.mockReturnValue("test-token");
-      mockValidateToken.mockResolvedValue({
+      mockLoginWithPKCE.mockResolvedValue({
         name: "Agent Smith",
         id: "agent-123",
         groupIds: ["group-a"],
+        token: "test-token",
       });
 
       render(
