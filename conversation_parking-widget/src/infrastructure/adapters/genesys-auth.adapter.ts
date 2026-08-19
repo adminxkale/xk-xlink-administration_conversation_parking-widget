@@ -1,23 +1,30 @@
+/**
+ * Genesys Cloud OAuth — Authorization Code Grant with PKCE + Popup Window
+ *
+ * Siempre usa pop-up window para el login, evitando restricciones de iframe.
+ * Compatible con React Strict Mode y Next.js.
+ */
+
 const TOKEN_KEY = 'genesys_token';
 const ENVIRONMENT_KEY = 'genesys_environment';
 const CODE_VERIFIER_KEY = 'pkce_code_verifier';
 
-/** Lock para evitar intercambios concurrentes del mismo code (Strict Mode / double-mount) */
-let exchangeInProgress: Promise<string> | null = null;
+/** Timeout para esperar la respuesta del popup (ms) */
+const POPUP_TIMEOUT_MS = 120_000; // 2 minutos
 
-/**
- * Genera un code_verifier random de 128 caracteres.
- * Usa crypto.getRandomValues (disponible en todos los browsers modernos).
- */
+/** Ruta de la página callback del popup (servida desde /public) */
+const POPUP_CALLBACK_PATH = '/auth-popup-callback.html';
+
+// ---------------------------------------------------------------------------
+// Helpers PKCE (crypto nativo del browser)
+// ---------------------------------------------------------------------------
+
 function generateCodeVerifier(length = 128): string {
   const array = new Uint8Array(length);
   crypto.getRandomValues(array);
   return base64UrlEncode(array).slice(0, length);
 }
 
-/**
- * Computa el code_challenge = Base64URL(SHA-256(code_verifier))
- */
 async function computeCodeChallenge(codeVerifier: string): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(codeVerifier);
@@ -25,29 +32,24 @@ async function computeCodeChallenge(codeVerifier: string): Promise<string> {
   return base64UrlEncode(new Uint8Array(digest));
 }
 
-/**
- * Base64 URL-safe encoding (sin padding, con - y _ en vez de + y /)
- */
 function base64UrlEncode(buffer: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < buffer.length; i++) {
     binary += String.fromCharCode(buffer[i]);
   }
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/**
- * Intercambia el authorization code por un access_token usando PKCE.
- */
+// ---------------------------------------------------------------------------
+// Intercambio de code por token
+// ---------------------------------------------------------------------------
+
 async function exchangeCodeForToken(
   code: string,
   clientId: string,
   redirectUri: string,
   codeVerifier: string,
-  environment: string
+  environment: string,
 ): Promise<string> {
   const tokenUrl = `https://login.${environment}/oauth/token`;
 
@@ -79,14 +81,13 @@ async function exchangeCodeForToken(
   return data.access_token;
 }
 
-/**
- * Validate token by calling Genesys Cloud `/api/v2/users/me?expand=groups`.
- * Returns user name, id, and group IDs.
- * Throws if validation fails.
- */
+// ---------------------------------------------------------------------------
+// Validar token
+// ---------------------------------------------------------------------------
+
 export async function validateToken(
   token: string,
-  environment: string
+  environment: string,
 ): Promise<{ name: string; id: string; groupIds: string[] }> {
   const response = await fetch(
     `https://api.${environment}/api/v2/users/me?expand=groups`,
@@ -95,7 +96,7 @@ export async function validateToken(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-    }
+    },
   );
 
   if (!response.ok) {
@@ -110,31 +111,108 @@ export async function validateToken(
   return { name: data.name ?? '', id: data.id ?? '', groupIds };
 }
 
-/**
- * Flujo principal de autenticación con Authorization Code + PKCE.
- *
- * Maneja 3 casos:
- * 1. Token guardado en localStorage → valida (prioridad máxima)
- * 2. Callback con ?code= → intercambia por token
- * 3. Sin token → inicia flujo PKCE (redirige a Genesys)
- */
-export async function loginWithPKCE(
+// ---------------------------------------------------------------------------
+// Popup Auth
+// ---------------------------------------------------------------------------
+
+function authenticateViaPopup(authUrl: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const width = 500;
+    const height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    const popup = window.open(
+      authUrl,
+      'genesys-auth-popup',
+      `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`,
+    );
+
+    if (!popup) {
+      reject(
+        new Error(
+          'No se pudo abrir la ventana de autenticación. Verificá que los pop-ups estén habilitados.',
+        ),
+      );
+      return;
+    }
+
+    const popupWindow: Window = popup;
+    let resolved = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        cleanup();
+        popupWindow.close();
+        reject(new Error('Timeout de autenticación. El usuario no completó el login a tiempo.'));
+      }
+    }, POPUP_TIMEOUT_MS);
+
+    const pollId = setInterval(() => {
+      if (popupWindow.closed && !resolved) {
+        resolved = true;
+        cleanup();
+        reject(new Error('La ventana de autenticación fue cerrada antes de completar el login.'));
+      }
+    }, 500);
+
+    function handleMessage(event: MessageEvent) {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== 'genesys-auth-popup-result') return;
+
+      resolved = true;
+      cleanup();
+      popupWindow.close();
+
+      if (event.data.error) {
+        reject(new Error(`Autorización denegada: ${event.data.error}`));
+      } else if (event.data.code) {
+        resolve(event.data.code);
+      } else {
+        reject(new Error('Respuesta inesperada de la ventana de autenticación.'));
+      }
+    }
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      clearInterval(pollId);
+      window.removeEventListener('message', handleMessage);
+    }
+
+    window.addEventListener('message', handleMessage);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Función principal: loginWithPKCE
+// ---------------------------------------------------------------------------
+
+/** Singleton promise para evitar múltiples flujos concurrentes (React Strict Mode). */
+let pendingLogin: Promise<{ name: string; id: string; groupIds: string[]; token: string }> | null = null;
+
+export function loginWithPKCE(
   clientId: string,
-  environment: string
+  environment: string,
+): Promise<{ name: string; id: string; groupIds: string[]; token: string }> {
+  if (pendingLogin) return pendingLogin;
+
+  pendingLogin = _doLoginWithPKCE(clientId, environment).finally(() => {
+    pendingLogin = null;
+  });
+
+  return pendingLogin;
+}
+
+async function _doLoginWithPKCE(
+  clientId: string,
+  environment: string,
 ): Promise<{ name: string; id: string; groupIds: string[]; token: string }> {
   localStorage.setItem(ENVIRONMENT_KEY, environment);
 
-  const redirectUri = window.location.origin + window.location.pathname;
-
-  // --- CASO 1: Hay token guardado → validar (cubre re-ejecuciones por Strict Mode) ---
+  // CASO 1: Hay token guardado → validar
   const storedToken = localStorage.getItem(TOKEN_KEY);
   if (storedToken) {
-    // Limpiar ?code= de la URL si quedó del redirect anterior
-    const currentParams = new URLSearchParams(window.location.search);
-    if (currentParams.has('code')) {
-      window.history.replaceState(null, '', redirectUri);
-    }
-
     try {
       const userInfo = await validateToken(storedToken, environment);
       return { ...userInfo, token: storedToken };
@@ -143,62 +221,42 @@ export async function loginWithPKCE(
     }
   }
 
-  // --- CASO 2: Estamos en el callback (URL tiene ?code=) ---
-  const urlParams = new URLSearchParams(window.location.search);
-  const authCode = urlParams.get('code');
-
-  if (authCode) {
-    // Reutilizar intercambio en progreso si ya hay uno (Strict Mode ejecuta useEffect 2 veces)
-    if (exchangeInProgress) {
-      const token = await exchangeInProgress;
-      const userInfo = await validateToken(token, environment);
-      return { ...userInfo, token };
-    }
-
-    const codeVerifier = sessionStorage.getItem(CODE_VERIFIER_KEY);
-    if (!codeVerifier) {
-      throw new Error('No se encontró el code_verifier. Recarga la página para reiniciar el flujo.');
-    }
-
-    // Iniciar intercambio con lock — no borrar el verifier hasta que sea exitoso
-    exchangeInProgress = exchangeCodeForToken(
-      authCode, clientId, redirectUri, codeVerifier, environment
-    );
-
-    try {
-      const token = await exchangeInProgress;
-
-      // Intercambio exitoso — ahora sí limpiar
-      sessionStorage.removeItem(CODE_VERIFIER_KEY);
-      localStorage.setItem(TOKEN_KEY, token);
-      window.history.replaceState(null, '', redirectUri);
-
-      const userInfo = await validateToken(token, environment);
-      return { ...userInfo, token };
-    } finally {
-      exchangeInProgress = null;
-    }
-  }
-
-  // --- CASO 3: No hay token ni code → iniciar flujo PKCE ---
+  // CASO 2: No hay token → iniciar flujo PKCE via popup
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await computeCodeChallenge(codeVerifier);
 
   sessionStorage.setItem(CODE_VERIFIER_KEY, codeVerifier);
 
+  const popupRedirectUri = `${window.location.origin}${POPUP_CALLBACK_PATH}`;
+
   const authUrl =
     `https://login.${environment}/oauth/authorize` +
     `?response_type=code` +
     `&client_id=${encodeURIComponent(clientId)}` +
-    `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+    `&redirect_uri=${encodeURIComponent(popupRedirectUri)}` +
     `&code_challenge_method=S256` +
     `&code_challenge=${encodeURIComponent(codeChallenge)}`;
 
-  window.location.href = authUrl;
+  const authCode = await authenticateViaPopup(authUrl);
 
-  // La página navega — esta promesa nunca se resuelve
-  return new Promise(() => {});
+  const token = await exchangeCodeForToken(
+    authCode,
+    clientId,
+    popupRedirectUri,
+    codeVerifier,
+    environment,
+  );
+
+  sessionStorage.removeItem(CODE_VERIFIER_KEY);
+  localStorage.setItem(TOKEN_KEY, token);
+
+  const userInfo = await validateToken(token, environment);
+  return { ...userInfo, token };
 }
+
+// ---------------------------------------------------------------------------
+// Utilidades
+// ---------------------------------------------------------------------------
 
 /**
  * Remove token from localStorage.
