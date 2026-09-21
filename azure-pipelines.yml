@@ -7,7 +7,7 @@ pr:
     include: ['*']
 
 variables:
-- group: GitHub-Mirror 
+- group: xlink-github-mirror 
 
 pool:
   vmImage: ubuntu-latest
